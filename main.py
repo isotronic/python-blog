@@ -5,10 +5,9 @@ from flask_login import UserMixin, login_user, LoginManager, current_user, logou
 from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy.orm import relationship
 from flask_ckeditor import CKEditor
 from datetime import date
-from forms import ContactForm, NewPostForm, RegisterForm, LoginForm
+from forms import ContactForm, NewPostForm, RegisterForm, LoginForm, CommentForm
 import smtplib
 import os
 
@@ -29,27 +28,44 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///blog.db'
 db = SQLAlchemy()
 db.init_app(app)
 
+gravatar = Gravatar(app, rating="g", default="retro",
+                    force_default=False, force_lower=False, use_ssl=True, base_url=None)
+
 
 class BlogPost(db.Model):
+    __tablename__ = "blog_posts"
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(250), unique=True, nullable=False)
     subtitle = db.Column(db.String(250), nullable=False)
     date = db.Column(db.String(250), nullable=False)
     body = db.Column(db.Text, nullable=False)
     author = db.relationship("User", back_populates="posts")
-    author_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    author_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     img_url = db.Column(db.String(250), nullable=False)
+    comments = db.relationship("Comment", back_populates="parent_post")
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
 class User(db.Model, UserMixin):
+    __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(250), unique=True, nullable=False)
     name = db.Column(db.String(250), nullable=False)
     password = db.Column(db.String(250), nullable=False)
     posts = db.relationship("BlogPost", back_populates="author")
+    comments = db.relationship("Comment", back_populates="author")
+
+
+class Comment(db.Model):
+    __tablename__ = "comments"
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.Text, nullable=False)
+    author = db.relationship("User", back_populates="comments")
+    author_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    post_id = db.Column(db.Integer, db.ForeignKey("blog_posts.id"))
+    parent_post = db.relationship("BlogPost", back_populates="comments")
 
 
 with app.app_context():
@@ -122,11 +138,21 @@ def logout():
     return redirect(url_for("home"))
 
 
-# TODO: Allow logged-in users to comment on posts
-@app.route("/post/<post_id>")
+@app.route("/post/<post_id>", methods=["GET", "POST"])
 def single_post(post_id):
+    form = CommentForm()
+    if form.validate_on_submit():
+        comment = Comment(
+            text=form.data.get("comment"),
+            author_id=current_user.id,
+            post_id=post_id
+        )
+        with app.app_context():
+            db.session.add(comment)
+            db.session.commit()
+
     post = db.session.execute(db.select(BlogPost).where(BlogPost.id == post_id)).scalar()
-    return render_template("post.html", post=post)
+    return render_template("post.html", post=post, form=form)
 
 
 @app.route("/new-post", methods=["POST", "GET"])

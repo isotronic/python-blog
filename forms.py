@@ -19,7 +19,7 @@ class ContactForm(FlaskForm):
     email = StringField(label="Email", validators=[DataRequired(), Email()])
     phone = TelField(label="Phone", validators=[DataRequired()])
     message = TextAreaField(label="Message", validators=[DataRequired()])
-    submit = SubmitField(label="Send")
+    submit = SubmitField(label="Send Message")
 
 
 class RegisterForm(FlaskForm):
@@ -35,4 +35,7 @@ class LoginForm(FlaskForm):
     submit = SubmitField(label="Login")
 
 
-# TODO: Create a CommentForm so users can leave comments below posts
+class CommentForm(FlaskForm):
+    comment = CKEditorField(label="Comment", validators=[DataRequired()])
+    submit = SubmitField(label="Submit Comment")
+
