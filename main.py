@@ -11,28 +11,35 @@ from forms import ContactForm, NewPostForm, RegisterForm, LoginForm, CommentForm
 import smtplib
 import os
 
-
+# Get email and password from environment variables
 MY_EMAIL = os.environ["EMAIL"]
 MY_PASSWORD = os.environ["PASSWORD"]
 
+# Initialize Flask app and configure settings
 app = Flask(__name__)
 app.secret_key = "some-secret-string"
 
+# Initialize Bootstrap and CKEditor extensions
 bootstrap = Bootstrap5(app)
 ckeditor = CKEditor(app)
 
+# Initialize LoginManager for user authentication
 login_manager = LoginManager()
 login_manager.init_app(app)
 
+# Configure the SQLAlchemy database URI
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///blog.db'
 db = SQLAlchemy()
 db.init_app(app)
 
+# Initialize Gravatar for user profile images
 gravatar = Gravatar(app, rating="g", default="retro",
                     force_default=False, force_lower=False, use_ssl=True, base_url=None)
 
 
+# Define the BlogPost class to represent blog posts in the database
 class BlogPost(db.Model):
+    # Table name and columns
     __tablename__ = "blog_posts"
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(250), unique=True, nullable=False)
@@ -44,11 +51,14 @@ class BlogPost(db.Model):
     img_url = db.Column(db.String(250), nullable=False)
     comments = db.relationship("Comment", back_populates="parent_post")
 
+    # Convert the object to a dictionary
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
+# Define the User class for user authentication and authorship
 class User(db.Model, UserMixin):
+    # Table name and columns
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(250), unique=True, nullable=False)
@@ -58,7 +68,9 @@ class User(db.Model, UserMixin):
     comments = db.relationship("Comment", back_populates="author")
 
 
+# Define the Comment class for blog post comments
 class Comment(db.Model):
+    # Table name and columns
     __tablename__ = "comments"
     id = db.Column(db.Integer, primary_key=True)
     text = db.Column(db.Text, nullable=False)
@@ -68,30 +80,35 @@ class Comment(db.Model):
     parent_post = db.relationship("BlogPost", back_populates="comments")
 
 
+# Create database tables within the app context
 with app.app_context():
     db.create_all()
 
 
+# Load the user for Flask-Login
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+# Custom decorator to restrict access to admin-only routes
 def admin_required(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if not current_user.id == 1:
-            return abort(403)
+        if not current_user.id == 1:  # Assuming admin user ID is 1
+            return abort(403)  # Return Forbidden status
         return func(*args, **kwargs)
     return decorated_function
 
 
+# Route for the home page
 @app.route("/")
 def home():
     result = db.session.execute(db.select(BlogPost)).scalars().all()
     return render_template("index.html", blog_posts=result)
 
 
+# Route for user registration
 @app.route("/register", methods=["GET", "POST"])
 def register():
     form = RegisterForm()
@@ -99,22 +116,26 @@ def register():
         name = form.data.get("name")
         email = form.data.get("email")
 
+        # Check if user already exists
         user = db.session.execute(db.select(User).where(User.email == email)).scalar()
         if user:
             flash("That email is already registered with us. Try logging in instead.")
             return redirect(url_for("login"))
 
+        # Hash the password and create a new user
         hashed_password = generate_password_hash(form.data.get("password"))
         new_user = User(name=name, email=email, password=hashed_password)
         db.session.add(new_user)
         db.session.commit()
 
+        # Log in the new user
         login_user(new_user)
 
         return redirect(url_for("home"))
     return render_template("register.html", form=form)
 
 
+# Route for user login
 @app.route("/login", methods=["GET", "POST"])
 def login():
     form = LoginForm()
@@ -132,16 +153,19 @@ def login():
     return render_template("login.html", form=form)
 
 
+# Route for user logout
 @app.route("/logout")
 def logout():
     logout_user()
     return redirect(url_for("home"))
 
 
+# Route for viewing a single blog post
 @app.route("/post/<post_id>", methods=["GET", "POST"])
 def single_post(post_id):
     form = CommentForm()
     if form.validate_on_submit():
+        # Create a new comment and add it to the database
         comment = Comment(
             text=form.data.get("comment"),
             author_id=current_user.id,
@@ -151,16 +175,19 @@ def single_post(post_id):
             db.session.add(comment)
             db.session.commit()
 
+    # Retrieve the specified blog post
     post = db.session.execute(db.select(BlogPost).where(BlogPost.id == post_id)).scalar()
     return render_template("post.html", post=post, form=form)
 
 
+# Route for creating a new blog post (admin-only)
 @app.route("/new-post", methods=["POST", "GET"])
 @admin_required
 def new_post():
     form = NewPostForm()
     heading = "New Post"
     if form.validate_on_submit():
+        # Create a new blog post and add it to the database
         post = BlogPost(
             title=form.title.data,
             subtitle=form.subtitle.data,
@@ -176,6 +203,7 @@ def new_post():
     return render_template("make-post.html", form=form, heading=heading)
 
 
+# Route for editing an existing blog post (admin-only)
 @app.route("/edit-post/<post_id>", methods=["POST", "GET"])
 @admin_required
 def edit_post(post_id):
@@ -188,6 +216,7 @@ def edit_post(post_id):
         post_id=post_id
     )
     if form.validate_on_submit():
+        # Update the blog post in the database
         post_to_edit = db.session.execute(db.select(BlogPost).where(BlogPost.id == form.post_id.data)).scalar()
         post_to_edit.title = form.title.data
         post_to_edit.subtitle = form.subtitle.data
@@ -199,6 +228,7 @@ def edit_post(post_id):
     return render_template("make-post.html", form=form, heading=heading)
 
 
+# Route for deleting a blog post (admin-only)
 @app.route("/delete/<int:post_id>")
 @admin_required
 def delete_post(post_id):
@@ -208,6 +238,7 @@ def delete_post(post_id):
     return redirect(url_for("home"))
 
 
+# Route for the contact page
 @app.route("/contact", methods=["POST", "GET"])
 def contact():
     form = ContactForm()
@@ -231,10 +262,12 @@ def contact():
     return render_template("contact.html", heading=heading, form=form)
 
 
+# Route for the about page
 @app.route("/about")
 def about():
     return render_template("about.html")
 
 
+# Run the app in debug mode if executed directly
 if __name__ == "__main__":
     app.run(debug=True, port=5003)
